@@ -10,7 +10,8 @@ import {
   X,
   HelpCircle,
   LogOut,
-  Search
+  Search,
+  Lock
 } from 'lucide-react';
 import { KeyboardShortcutsDialog } from '@/components/shortcuts/KeyboardShortcutsDialog';
 import { cn } from '@/lib/utils';
@@ -29,6 +30,7 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/scans', icon: Shield, label: 'Website Scans' },
   { to: '/phishing', icon: Mail, label: 'Phishing Check' },
+  { to: '/encrypt', icon: Lock, label: 'PDF Secure Vault' }, 
   { to: '/training', icon: GraduationCap, label: 'Training' },
   { to: '/team', icon: Users, label: 'Team' },
   { to: '/activity', icon: Activity, label: 'Activity Log' },

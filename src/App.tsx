@@ -20,6 +20,7 @@ import Settings from "@/pages/Settings";
 import Team from "@/pages/Team";
 import ActivityLog from "@/pages/ActivityLog";
 import NotFound from "@/pages/NotFound";
+import PDFEncryption from './pages/PDFEncryption';
 
 const queryClient = new QueryClient();
 
@@ -51,6 +52,7 @@ const App = () => (
                   <Route path="/team" element={<Team />} />
                   <Route path="/activity" element={<ActivityLog />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/encrypt" element={<PDFEncryption />} />
                 </Route>
               </Route>
               

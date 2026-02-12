@@ -8,8 +8,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
 
-router.post('/encrypt', upload.single('pdf'), async (req, res) => {
-    try {
+router.post('/upload', upload.single('pdf'), async (req, res) => {    try {
         if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
         const kmsKey = process.env.KMS_MASTER_SECRET;
