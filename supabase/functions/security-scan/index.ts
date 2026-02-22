@@ -34,6 +34,15 @@ interface Finding {
   recommendation: string;
 }
 
+interface ActivityLogInput {
+  userId: string | null;
+  organizationId?: string | null;
+  action: "scan.started" | "scan.completed" | "scan.failed";
+  resourceId: string;
+  target: string;
+  details?: Record<string, unknown>;
+}
+
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
@@ -264,8 +273,37 @@ async function getServiceClient() {
   return createClient(supabaseUrl, serviceRoleKey);
 }
 
+async function logScanActivity(
+  serviceClient: Awaited<ReturnType<typeof getServiceClient>>,
+  input: ActivityLogInput,
+): Promise<void> {
+  // activity_logs.user_id is NOT NULL; skip logging if scan is not tied to a user.
+  if (!input.userId) return;
+
+  const { error } = await serviceClient.from("activity_logs").insert({
+    user_id: input.userId,
+    organization_id: input.organizationId ?? null,
+    action: input.action,
+    resource_type: "scan",
+    resource_id: input.resourceId,
+    details: {
+      target: input.target,
+      ...(input.details ?? {}),
+    },
+  });
+
+  if (error) {
+    console.error("Failed to insert activity log", error);
+  }
+}
+
 async function processScan(scanId: string, target: string): Promise<void> {
   const serviceClient = await getServiceClient();
+  const { data: scanOwner } = await serviceClient
+    .from("scans")
+    .select("user_id,organization_id")
+    .eq("id", scanId)
+    .maybeSingle();
 
   const { data: concurrentScans } = await serviceClient
     .from("scans")
@@ -278,6 +316,14 @@ async function processScan(scanId: string, target: string): Promise<void> {
       .from("scans")
       .update({ status: "failed", completed_at: new Date().toISOString(), scan_error: "Max concurrent scans reached" })
       .eq("id", scanId);
+    await logScanActivity(serviceClient, {
+      userId: scanOwner?.user_id ?? null,
+      organizationId: scanOwner?.organization_id ?? null,
+      action: "scan.failed",
+      resourceId: scanId,
+      target,
+      details: { reason: "Max concurrent scans reached" },
+    });
     return;
   }
 
@@ -312,15 +358,34 @@ async function processScan(scanId: string, target: string): Promise<void> {
         scan_error: null,
       })
       .eq("id", scanId);
+
+    await logScanActivity(serviceClient, {
+      userId: scanOwner?.user_id ?? null,
+      organizationId: scanOwner?.organization_id ?? null,
+      action: "scan.completed",
+      resourceId: scanId,
+      target,
+      details: { score, issue_counts: counts },
+    });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Scan failed";
     await serviceClient
       .from("scans")
       .update({
         status: "failed",
         completed_at: new Date().toISOString(),
-        scan_error: error instanceof Error ? error.message : "Scan failed",
+        scan_error: message,
       })
       .eq("id", scanId);
+
+    await logScanActivity(serviceClient, {
+      userId: scanOwner?.user_id ?? null,
+      organizationId: scanOwner?.organization_id ?? null,
+      action: "scan.failed",
+      resourceId: scanId,
+      target,
+      details: { reason: message },
+    });
   }
 }
 
@@ -363,6 +428,15 @@ async function handleCreateScan(req: Request): Promise<Response> {
     console.error("Failed to create scan", error);
     return jsonResponse({ error: "Server error creating scan" }, 500);
   }
+
+  await logScanActivity(serviceClient, {
+    userId: body.requested_by_user ?? null,
+    organizationId: body.org_id ?? null,
+    action: "scan.started",
+    resourceId: scan.id,
+    target: validatedTarget.toString(),
+    details: { scan_type: body.scan_type ?? "web_vuln", source: "api" },
+  });
 
   const runner = processScan(scan.id, validatedTarget.toString());
   // Keep processing alive after the HTTP response where supported.
@@ -465,6 +539,22 @@ async function handleLegacyInvoke(req: Request): Promise<Response> {
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : "Invalid target" }, 400);
   }
+
+  const serviceClient = await getServiceClient();
+  const { data: scanMeta } = await serviceClient
+    .from("scans")
+    .select("user_id,organization_id,scan_type")
+    .eq("id", scanId)
+    .maybeSingle();
+
+  await logScanActivity(serviceClient, {
+    userId: scanMeta?.user_id ?? null,
+    organizationId: scanMeta?.organization_id ?? null,
+    action: "scan.started",
+    resourceId: scanId,
+    target: validatedTarget.toString(),
+    details: { scan_type: scanMeta?.scan_type ?? "quick", source: "dashboard_legacy" },
+  });
 
   const runner = processScan(scanId, validatedTarget.toString());
   if (typeof (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil === "function") {
